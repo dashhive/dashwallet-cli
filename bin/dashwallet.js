@@ -28,8 +28,8 @@ let Os = require("node:os");
 
 let envSuffix = "";
 require("dotenv").config({ path: Path.join(__dirname, "../.env") });
-if (process.env.DASH_ENV) {
-  envSuffix = `.${process.env.DASH_ENV}`;
+if ("string" === typeof process.env.DASH_ENV) {
+  envSuffix = `${process.env.DASH_ENV}`;
 }
 
 let home = Os.homedir();
@@ -83,10 +83,14 @@ async function main() {
   let confName = Cli.removeOption(args, ["-c", "--config-name"]);
   if (null !== confName) {
     // intentional empty string on CLI takes precedence over ENVs
-    envSuffix = `.${confName}`;
+    envSuffix = `${confName}`;
   }
-  // ..dev => .dev
-  envSuffix = envSuffix.replace(/^\.+/, "+");
+  // ..dev => dev
+  envSuffix = envSuffix.replace(/^\.+/, "");
+  // dev => .dev
+  if (envSuffix) {
+    envSuffix = `.${envSuffix}`;
+  }
 
   /** @type {FsStoreConfig} */
   let storeConfig = {
