@@ -1,12 +1,14 @@
 {
   "name": "dashwallet-cli",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "A more civilized wallet for a less civilized age",
   "main": "index.js",
   "bin": {
     "dashwallet": "bin/dashwallet.js"
   },
-  "files": ["bin/"],
+  "files": [
+    "bin/"
+  ],
   "scripts": {
     "bump": "npm version -m \"chore(release): bump to v%s\"",
     "fmt": "npx -p prettier@2.x -- prettier -w '**/*.{js,md}'",
