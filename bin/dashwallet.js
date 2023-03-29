@@ -83,8 +83,10 @@ async function main() {
   let confName = Cli.removeOption(args, ["-c", "--config-name"]);
   if (null !== confName) {
     // intentional empty string on CLI takes precedence over ENVs
-    envSuffix = confName;
+    envSuffix = `.${confName}`;
   }
+  // ..dev => .dev
+  envSuffix = envSuffix.replace(/^\.+/, "+");
 
   /** @type {FsStoreConfig} */
   let storeConfig = {
@@ -310,7 +312,7 @@ let SHORT_VERSION = `${pkg.name} v${pkg.version} - ${pkg.description}`;
 
 function showVersion() {
   console.info(SHORT_VERSION);
-  let sdkVersions = require('./_sdk-versions.js');
+  let sdkVersions = require("./_sdk-versions.js");
   sdkVersions.log(pkg);
 }
 
