@@ -40,7 +40,7 @@
     "@dashincubator/secp256k1": "^1.7.1-5",
     "dashkeys": "^1.0.0",
     "dashsight": "^1.6.0",
-    "dashwallet": "^0.5.3",
+    "dashwallet": "^0.5.5",
     "dotenv": "^16.0.3"
   }
 }
