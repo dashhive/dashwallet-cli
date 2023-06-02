@@ -36,11 +36,11 @@ let home = Os.homedir();
 
 //
 //
-// TODO XXX DO NOT COMMIT. DO NOT PULL IN. DO NOT COLLECT $200.
+// TODO XXXX DO NOT COMMIT. DO NOT PULL IN. DO NOT COLLECT $200.
 //
 //
-//let Wallet = require("dashwallet");
-let Wallet = require("../../");
+let Wallet = require("dashwallet");
+//let Wallet = require("../../");
 let Cli = require("./_cli.js");
 let Qr = require("./_qr.js");
 
@@ -187,7 +187,7 @@ async function main() {
 
   let isRequestingTransfer = Cli.removeFlag(args, ["request"]);
   if (isRequestingTransfer) {
-    await requestTransfer(config, wallet, args);
+    await requestMoney(config, wallet, args);
     return wallet;
   }
 
@@ -217,7 +217,7 @@ async function main() {
 
   let send = Cli.removeFlag(args, ["send", "pay"]);
   if (send) {
-    await sendToContact(config, wallet, args);
+    await sendMoney(config, wallet, args);
     return wallet;
   }
 
@@ -231,7 +231,12 @@ async function main() {
   }
   */
 
-  let showBalances = Cli.removeFlag(args, ["accounts", "balance", "balances"]);
+  let showBalances = Cli.removeFlag(args, [
+    "contacts",
+    "accounts",
+    "balance",
+    "balances",
+  ]);
   if (showBalances) {
     await getBalances(config, wallet, args);
     return null;
@@ -311,18 +316,27 @@ let USAGE = [
   `    contact <handle> xpub-or-addr      add contact or show xpubs & addrs`,
   `    request <handle> [amount]          show QR and payment address`,
   `    generate address                   (for debugging only) save a one-off WIF`,
-  `    import <./path/to.wif>             save private keys`,
+  `    import <./path/to.wif>             copy and index private key(s)`,
   `    coins [--sort wallet,amount,addr]  show all spendable coins`,
-  `    send <handle|pay-addr> <DASH>      send to an address or contact`,
-  `                    [--dry-run] [--coins Xxxxx:xx:0,...]`,
+  `    denominate <coins-or-amounts>      prepare coins for cash-like transactions`,
+  `                    [--broadcast]`,
+  `    send <handle|pay-addr> <DASH>      send money to an address/contact`,
+  `                    [--broadcast]        using the specified coins or accounts`,
+  `                    [--coins Xxxxx:xx:0,...]`,
+  `                    [--acounts main,@johndoe,...]`,
+  `                    [--break-change]`,
+  `                    [--allow-change]`,
+  `                    [--change-account main]`,
   // TODO or contact
   `    remove <addr> [--no-wif]           remove stand-alone key`,
   `    stat <addr>                        show current coins & balance`,
+  `    estimate <#inputs> <#outputs>      show low-level block fees`,
+  `                                       (TODO: move to DashTX)`,
   `    sync                               update address caches`,
   `    version                            show version and exit`,
   ``,
   `OPTIONS:`,
-  `    DASH_ENV, -c, --config-name ''     use ~/.config/dash{.suffix}/`,
+  `    -c, --config-name '', DASH_ENV=''  use ~/.config/dash{.suffix}/`,
   `    --config-dir ~/.config/dash/       change full config path`,
   `    --json                             output as JSON (if possible)`,
   //`    --offline                             no sync, cache updates, balance checks, etc`,
@@ -399,11 +413,23 @@ async function upsertContact(config, wallet, args) {
   console.info();
   console.info(qr);
   console.info();
+
+  console.info(`1. You can send money to ${handle} by:`);
+  console.info(`    a) scanning the QR above with compatible software`);
+  console.info(`    or b) run the following command:`);
+  console.info();
+  console.info(`        dashwallet send ${handle} 0.001`);
+  console.info();
+  console.info(`2. To let ${handle} add YOU as a contact, run this:`);
+  console.info();
+  console.info(`        dashwallet request ${handle}`);
+  console.info();
+  console.info();
 }
 
 /** @type {Subcommand} */
-async function requestTransfer(config, wallet, args) {
-  let [handle] = args;
+async function requestMoney(config, wallet, args) {
+  let [handle, amount] = args;
   if (!handle) {
     throw Error(
       `Usage: dashwallet request <handle> [amount] [--legacy <address count>]`,
@@ -411,6 +437,8 @@ async function requestTransfer(config, wallet, args) {
   }
   let countStr = Cli.removeOption(args, ["--legacy", "-n"]);
   let count = parseInt(countStr, 10) || 1;
+
+  // TODO XXXX denominate amount and print to screen
 
   let [rxXPub] = await wallet.contact({
     handle,
@@ -444,12 +472,35 @@ async function requestTransfer(config, wallet, args) {
   console.info();
 
   let rxAddr = rxAddrsInfo.addresses[0];
-  let url = toUrl(rxXPub, rxAddr);
+  let url = toUrl(rxXPub, rxAddr, null, amount);
   console.info(url);
 
-  let qr = toQrAscii(rxXPub, rxAddr, [], 0, { invert: true });
+  let qr = toQrAscii(rxXPub, rxAddr, null, amount, { invert: true });
   console.info();
   console.info(qr);
+  console.info();
+
+  // TODO set your preferred nickname globally in preferences, and per-contact
+  console.info(`1. ${handle} can add YOU as a contact by:`);
+  console.info(`    a) scanning the QR above with contact-compatible software`);
+  console.info(`    or b) run the following command:`);
+  console.info();
+  console.info(`        dashwallet contact @YOUR_NICKNAME ${rxXPub}`);
+  console.info();
+  console.info(`2. ${handle} can send money TO YOU with this command:`);
+  console.info();
+  console.info(`        dashwallet send @YOUR_NICKNAME ${amount}`);
+  console.info();
+  console.info(`3. You can add ${handle} as a contact by:`);
+  console.info(`    a) asking them for the QR to scan from that command`);
+  console.info(`    or b) ask them to run this to create your an xpub:`);
+  console.info();
+  console.info(`        dashwallet request @YOUR_NICKNAME`);
+  console.info();
+  console.info(`4. YOU run 'dashwallet contact ${handle} <XPUB>' to add them`);
+  console.info();
+  console.info(`        dashwallet contact @YOUR_NICKNAME THEIR_XPUB_HERE`);
+  console.info();
   console.info();
 }
 
@@ -712,14 +763,16 @@ function toDustFixed(satoshis) {
   return dash;
 }
 
-function randomize() {
-  return 0.5 - Math.random();
-}
-
 // denominate <coins> send these coins to person x, minus fees
 /** @type {Subcommand} */
 async function denominate(config, wallet, args) {
   let dryRun = Cli.removeFlag(args, ["--dry-run"]);
+  let broadcast = Cli.removeFlag(args, ["--broadcast"]);
+  if (dryRun) {
+    broadcast = false;
+  }
+  // TODO XXXX
+  //let broadcast = Cli.removeFlag(args, ["--broadcast"]);
   let inputStr = Cli.removeArg(args);
   let inputList = inputStr.split(",");
   inputList = inputList.filter(Boolean);
@@ -793,8 +846,6 @@ async function denominate(config, wallet, args) {
   dust += sixFees;
   let cost = dust;
 
-  console.log(newCoins);
-
   let fees = await DashTx.appraise({ inputs: inputList, outputs: outputs });
   let feeStr = toDustFixed(fees.mid);
 
@@ -854,13 +905,12 @@ async function denominate(config, wallet, args) {
   });
   console.info(addrsInfo.addresses);
 
-  // TODO use knuthShuffle or explicit crypto random
   let addresses = addrsInfo.addresses.slice(0);
-  fauxTxos.sort(randomize);
-  outputs.sort(randomize);
   for (let output of outputs) {
     output.address = addresses.pop();
   }
+  fauxTxos.sort(Wallet.sortInputs);
+  outputs.sort(Wallet.sortOutputs);
 
   for (let output of outputs) {
     //@ts-ignore TODO bad export
@@ -879,7 +929,7 @@ async function denominate(config, wallet, args) {
   try {
     keys = await wallet._utxosToPrivKeys(fauxTxos);
   } catch (e) {
-    if (!dryRun) {
+    if (broadcast) {
       throw e;
     }
   }
@@ -890,15 +940,23 @@ async function denominate(config, wallet, args) {
   let txInfo = await dashTx.hashAndSignAll(txInfoRaw, keys);
 
   //let wutxos = await sendAndReport(txInfo, dryRun);
-  await sendAndReport(txInfo, dryRun);
+  await sendAndReport(txInfo, broadcast, dryRun);
 }
 
-async function sendAndReport(txInfo, dryRun) {
-  if (dryRun) {
+async function sendAndReport(txInfo, broadcast, dryRun) {
+  if (!broadcast) {
     console.info(
       "Transaction Hex: (inspect at https://live.blockcypher.com/dash/decodetx/)",
     );
     console.info(txInfo.transaction);
+    console.info();
+
+    if (!dryRun) {
+      console.info();
+      console.info(`NOT SENT`);
+      console.info(`Use '--broadcast' to really send this transaction.`);
+      console.info();
+    }
   } else {
     // TODO sendTx
     let txResult = await config.dashsight.instantSend(txInfo.transaction);
@@ -944,13 +1002,17 @@ async function inputListToFauxTxos(wallet, inputList) {
 // pay <handle> <amount> [coins] send this amount to person x,
 //     using ALL coins, and send back the change
 /** @type {Subcommand} */
-async function sendToContact(config, wallet, args) {
+async function sendMoney(config, wallet, args) {
   let accountList = Cli.removeOption(args, ["--accounts"]);
   let changeAccount = Cli.removeOption(args, ["--change-account"]);
   let breakChange = Cli.removeFlag(args, ["--break-change"]);
   //let donate = Cli.removeFlag(args, ["--donate"]);
   //let forceDonation = Cli.removeOption(args, ["--force-donation"]) ?? "";
   let dryRun = Cli.removeFlag(args, ["--dry-run"]);
+  let broadcast = Cli.removeFlag(args, ["--broadcast"]);
+  if (dryRun) {
+    broadcast = false;
+  }
   let allowChange = Cli.removeFlag(args, ["--allow-change"]);
   let coinList = Cli.removeOption(args, ["--coins"]);
   if (!changeAccount) {
@@ -970,10 +1032,6 @@ async function sendToContact(config, wallet, args) {
       ].join("\n"),
     );
   }
-
-  // TODO: if `handle` is a single address
-  // if the payment can't be made cleanly,
-  // first break change.
 
   // TODO: don't allow mix and match of XPub send and FingerPrintSend
 
@@ -1087,11 +1145,8 @@ async function sendToContact(config, wallet, args) {
       }
     }
 
-    console.log("allOutVals", allOutVals);
-    console.log("outVals", outVals);
     for (let denom of outVals) {
       let index = allOutVals.indexOf(denom);
-      console.log(denom);
       if (index === -1) {
         throw new Error(
           "ERROR: missing output values (this should be impossible)",
@@ -1165,12 +1220,8 @@ async function sendToContact(config, wallet, args) {
     inputs: selection.inputs,
     outputs: outputs,
   };
-  // TODO use fully-deterministic sort order instead?
-  // (lexicographic tx id, to addr, greatest to least)
-  txInfoRaw.inputs.sort(randomize);
-  txInfoRaw.outputs.sort(randomize);
-  console.log("txInfoRaw");
-  //console.log(txInfoRaw.inputs);
+  txInfoRaw.inputs.sort(Wallet.sortInputs);
+  txInfoRaw.outputs.sort(Wallet.sortOutputs);
 
   let fees = await DashTx.appraise(txInfoRaw);
 
@@ -1184,8 +1235,7 @@ async function sendToContact(config, wallet, args) {
     totalSatsIn += input.satoshis;
     let dust = sats - input.faceValue;
     dust = dust % wallet.__STAMP__;
-    console.log(`   ${addr}: ${dashVal}      | ${sats} (${dust})`);
-    //console.log(input.satoshis)
+    console.info(`   ${addr}: ${dashVal}      | ${sats} (${dust})`);
   }
   let dashVal8 = Wallet.toDash(totalSatsIn).toFixed(8);
   let dashVal3 = Wallet.toDash(totalFaceIn).toFixed(3);
@@ -1198,11 +1248,11 @@ async function sendToContact(config, wallet, args) {
   let oddStamps = stampsIn - evenStamps;
   let sats10 = totalSatsIn.toString().padStart(10, " ");
 
-  console.log(
+  console.info(
     ` Total In: ${dashVal8} | ${sats10} | ${dashVal3} + (${stampsIn} * ${wallet.__STAMP__}) (${stampsPerEach}/c + ${oddStamps})`,
   );
-  console.log(` ${txInfoRaw.inputs.length} Coins`);
-  console.log();
+  console.info(` ${txInfoRaw.inputs.length} Coins`);
+  console.info();
 
   let totalFaceOut = 0;
   let totalSatsOut = 0;
@@ -1217,13 +1267,10 @@ async function sendToContact(config, wallet, args) {
   let stampsOut = stampsValOut / wallet.__STAMP__;
 
   let fee = totalSatsIn - totalSatsOut;
-  console.log(`initial fee: ${fee} (requires ${fees.max})`);
   let dustFee = fee - fees.max;
   let dustStamps = dustFee / wallet.__STAMP__;
   dustStamps = Math.floor(dustStamps);
   let dustStampsVal = dustStamps * wallet.__STAMP__;
-  console.log(`dustStamps: ${dustStamps}`);
-  console.log(`dustStampsVal: ${dustStampsVal}`);
   fee -= dustStampsVal;
   for (let output of outputs) {
     if (dustStamps === 0) {
@@ -1235,7 +1282,7 @@ async function sendToContact(config, wallet, args) {
     output.stamps += 1;
     dustStamps -= 1;
   }
-  txInfoRaw.outputs.sort(randomize);
+  txInfoRaw.outputs.sort(Wallet.sortOutputs);
 
   let satsOut10 = totalSatsOut.toString().padStart(10, " ");
 
@@ -1243,17 +1290,17 @@ async function sendToContact(config, wallet, args) {
     let addr = output.address.slice(0, 6);
     let dashVal = Wallet.toDash(output.faceValue).toFixed(3);
     let sats = output.satoshis.toString().padStart(10, " ");
-    console.log(
+    console.info(
       `   ${addr}: ${dashVal}      | ${sats} (${output.stamps} * ${wallet.__STAMP__})`,
     );
   }
 
-  console.log(
+  console.info(
     `Total Out: ${dashSatsOut} | ${satsOut10} | ${dashFaceOut} + (${stampsOut} * ${wallet.__STAMP__})`, //  (${stampsPerEach}/c + ${oddStamps})
   );
-  console.log(`${txInfoRaw.outputs.length} Coins`);
+  console.info(`${txInfoRaw.outputs.length} Coins`);
   let dustyFee = fee - fees.max;
-  console.log(
+  console.info(
     `Fee:             ${fee} |   ${totalSatsIn} - ${totalSatsOut} = (${fees.max} + ${dustyFee})`,
   );
 
@@ -1266,101 +1313,41 @@ async function sendToContact(config, wallet, args) {
 
   let keys = await wallet._utxosToPrivKeys(selection.inputs);
   let txInfo = await dashTx.hashAndSignAll(txInfoRaw, keys, {
-    randomize: false,
+    presorted: true,
   });
 
   console.info();
-  if (dryRun) {
+  if (!broadcast) {
     console.info(
       "Transaction Hex: (inspect at https://live.blockcypher.com/dash/decodetx/)",
     );
     console.info();
     console.info(txInfo.transaction);
-  } else {
-    // TODO sendTx
-    let txResult = await config.dashsight.instantSend(txInfo.transaction);
-    console.info("Sent!");
     console.info();
-    console.info(`https://insight.dash.org/tx/${txResult.txid}`);
+
+    if (!dryRun) {
+      console.info();
+      console.info(`NOT SENT`);
+      console.info(`Use '--broadcast' to really send this transaction.`);
+      console.info();
+    }
+    return;
   }
+
+  // TODO sendTx
+  let txResult = await config.dashsight.instantSend(txInfo.transaction);
+  console.info("Sent!");
+  console.info();
+  console.info(`https://insight.dash.org/tx/${txResult.txid}`);
   console.info();
 
-  return;
-
-  let wutxos = dirtyTx.inputs.map(
-    /**
-     * @param {CoreUtxo} utxo
-     * @return {WalletUtxo} utxo
-     */
-    function (utxo) {
-      let walletName = config.safe.cache.addresses[utxo.address].wallet;
-      return Object.assign({ wallet: walletName }, utxo);
-    },
-  );
-
-  wutxos.sort(
-    /** @type {CoinSorter} */
-    function (a, b) {
-      let result = 0;
-      ["amount", "satoshis", "wallet", "addr"].some(function (sortBy) {
-        if (!coinSorters[sortBy]) {
-          throw new Error(`unrecognized sort '${sortBy}'`);
-        }
-        if ("amount" === sortBy) {
-          sortBy = "satoshis";
-        }
-
-        //@ts-ignore - TODO
-        result = coinSorters[sortBy](sortatizeUtxo(a), sortatizeUtxo(b));
-        return result;
-      });
-      return result;
-    },
-  );
-
-  let maxLen = Wallet.toDash(wutxos[0].satoshis).toFixed(8).length;
-  //let amountLabel = "Amount".padStart(maxLen, " ");
-
-  console.info(`Coin inputs (utxos):`);
-
-  //console.info(`    ${amountLabel}  Coin (Addr:Tx:Out)  Wallet`);
-  wutxos.forEach(
-    /** @param {WalletUtxo} utxo */
-    function (utxo) {
-      let dashAmount = Wallet.toDash(utxo.satoshis)
-        .toFixed(8)
-        .padStart(maxLen, " ");
-      let coin = utxoToCoin(utxo.address, utxo);
-
-      console.info(
-        `                         ${dashAmount}  ${coin}  ${utxo.wallet}`,
-      );
-    },
-  );
-  let balanceAmount = Wallet.toDash(dirtyTx.total)
-    .toFixed(8)
-    .padStart(maxLen, " ");
-  console.info(`                       -------------`);
-  console.info(`                         ${balanceAmount}  (total)`);
-
-  console.info();
-
-  let sentSats = dirtyTx.sent || 0;
-  let sentAmount = Wallet.toDash(sentSats).toFixed(8).padStart(maxLen, " ");
-  console.info(`Paid to Recipient:       ${sentAmount}  (${handle})`);
-
-  let feeAmount = Wallet.toDash(dirtyTx.fee).toFixed(8).padStart(maxLen, " ");
-  console.info(`Network Fee:             ${feeAmount}`);
-
-  let changeSats = dirtyTx.change?.satoshis || 0;
-  let changeAmount = Wallet.toDash(changeSats).toFixed(8).padStart(maxLen, " ");
-  console.info(`Change:                  ${changeAmount}`);
-
-  if (!dryRun) {
-    // TODO move to sendTx
-    let now = Date.now();
-    await wallet.captureDirtyTx({ summary: dirtyTx, now: now });
-  }
+  // TODO move to sendTx
+  let now = Date.now();
+  await wallet.captureTx({
+    inputs: txInfo.inputs,
+    outputs: txInfo.outputs,
+    now: now,
+  });
 
   await config.store.save(config.safe.cache);
 }
