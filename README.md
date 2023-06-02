@@ -10,6 +10,46 @@ dashwallet send @johndoe 1.0
 Sent Đ1.0 to @johndoe!
 ```
 
+# Getting Started
+
+## 1. Request Money
+
+Generate or show the XPub, dash URL, and QR code to give to your contact:
+
+```sh
+dashwallet request @alice 1.250
+```
+
+## 2. Add a Contact
+
+Create or add a new pay-to wallet for a contact by their X Pub Address:
+
+```sh
+dashwallet contact @alice <xpub>
+```
+
+## 3. Send Money
+
+You can use a contact name, X Pub Address, or Legacy address:
+
+```sh
+dashwallet send @alice 1.250 --allow-change
+```
+
+## 4. Check Balances
+
+See all (unspent) coins and stamps, or all balances across all accounts:
+
+```sh
+dashwallet coins
+```
+
+```sh
+dashwallet accounts
+```
+
+Note: Stamp values represent how many times a coin can be sent.
+
 # Install
 
 1. Install [`node`](https://webinstall.dev/node)
@@ -30,7 +70,7 @@ Sent Đ1.0 to @johndoe!
 # CLI
 
 ```txt
-dashwallet v0.5.2 - A more civilized wallet for a less civilized age
+dashwallet-cli v0.6.0 - A more civilized wallet for a less civilized age
 
 USAGE:
     dashwallet <subcommand> [flags] [options] [--] [args]
@@ -38,8 +78,9 @@ USAGE:
 SUBCOMMANDS:
     accounts                           show accounts (and extra wallets)
     export <addr> [./dir/ or x.wif]    write private keys to disk
-    contact <handle> [xpub-or-addr]    add contact or show xpubs & addrs
-    generate address                   gen and store one-off wif
+    contact <handle> xpub-or-addr      add contact or show xpubs & addrs
+    request <handle> [amount]          show QR and payment address
+    generate address                   (for debugging only) save a one-off WIF
     import <./path/to.wif>             save private keys
     coins [--sort wallet,amount,addr]  show all spendable coins
     send <handle|pay-addr> <DASH>      send to an address or contact
@@ -60,14 +101,24 @@ OPTIONS:
 
 ```sh
 # dashwallet contact <handle> [xpub-or-addr]
+
 dashwallet contact @johndoe 'xpubXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
+
 dashwallet contact @kraken 'Xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
 ```
 
 ```txt
 Send DASH to '<handle>' at this address:
 Xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
 
+```sh
+# dashwallet request <handle> [amount]
+
+dashwallet request @johndoe
+```
+
+```text
 Share this address with '<handle>':
 xpubXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 ```

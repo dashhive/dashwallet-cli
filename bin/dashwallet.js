@@ -42,11 +42,14 @@ let home = Os.homedir();
 //let Wallet = require("dashwallet");
 let Wallet = require("../../");
 let Cli = require("./_cli.js");
+let Qr = require("./_qr.js");
 
 let DashKeys = require("dashkeys");
 let DashSight = require("dashsight");
 let DashTx = require("dashtx");
 // let Qr = require("./qr.js");
+
+const ADDR_CHAR_LEN = 34;
 
 /**
  * @param {String} v
@@ -121,18 +124,18 @@ async function main() {
   require("dotenv").config({ path: `${storeConfig.dir}/env` });
   require("dotenv").config({ path: `${storeConfig.dir}/.env.secret` });
 
-  let confDir = removeFlagAndArg(args, ["-c", "--config-dir"]);
+  let confDir = Cli.removeOption(args, ["-c", "--config-dir"]);
   if (confDir) {
     // TODO check validity
     storeConfig.dir = confDir;
   }
 
-  let jsonArg = removeFlag(args, ["--json"]);
+  let jsonArg = Cli.removeFlag(args, ["--json"]);
   if (jsonArg) {
     jsonOut = true;
   }
 
-  let syncNow = removeFlagAndArg(args, ["--sync"]);
+  let syncNow = Cli.removeOption(args, ["--sync"]);
   if (syncNow) {
     config.staletime = 0;
   }
@@ -142,8 +145,8 @@ async function main() {
     insightBaseUrl:
       process.env.INSIGHT_BASE_URL || "https://insight.dash.org/insight-api",
     dashsightBaseUrl:
-      process.env.DASHSIGHT_BASE_URL ||
-      "https://dashsight.dashincubator.dev/insight-api",
+      process.env.DASHSIGHT_BASE_URL || "https://insight.dash.org/insight-api",
+    //"https://dashsight.dashincubator.dev/insight-api",
     dashsocketBaseUrl:
       process.env.DASHSOCKET_BASE_URL || "https://insight.dash.org/socket.io",
   });
@@ -169,57 +172,66 @@ async function main() {
 
   let wallet = await Wallet.create(config);
 
-  let version = removeFlag(args, ["version", "-V", "--version"]);
+  let version = Cli.removeFlag(args, ["version", "-V", "--version"]);
   if (version) {
     showVersion();
     process.exit(0);
     return;
   }
 
-  let friend = removeFlag(args, ["connect", "contact", "friend"]);
-  if (friend) {
-    await befriend(config, wallet, args);
+  let handle = Cli.removeFlag(args, ["connect", "contact", "friend"]);
+  if (handle) {
+    await upsertContact(config, wallet, args);
     return wallet;
   }
 
-  let importWif = removeFlag(args, ["import"]);
+  let isRequestingTransfer = Cli.removeFlag(args, ["request"]);
+  if (isRequestingTransfer) {
+    await requestTransfer(config, wallet, args);
+    return wallet;
+  }
+
+  let importWif = Cli.removeFlag(args, ["import"]);
   if (importWif) {
     await createWif(config, wallet, args);
     return wallet;
   }
 
-  let list = removeFlag(args, ["coins", "list"]);
+  let list = Cli.removeFlag(args, ["coins", "list"]);
   if (list) {
     await listCoins(config, wallet, args);
     return wallet;
   }
 
-  let est = removeFlag(args, ["appraise", "estimate"]);
+  let est = Cli.removeFlag(args, ["appraise", "estimate"]);
   if (est) {
     await appraise(config, wallet, args);
     return wallet;
   }
 
-  let denom = removeFlag(args, ["denom", "denominate"]);
+  let denom = Cli.removeFlag(args, ["denom", "denominate"]);
   if (denom) {
     await denominate(config, wallet, args);
     return wallet;
   }
 
-  let send = removeFlag(args, ["send", "pay"]);
+  let send = Cli.removeFlag(args, ["send", "pay"]);
   if (send) {
-    await pay(config, wallet, args);
+    await sendToContact(config, wallet, args);
     return wallet;
   }
 
-  let donate = removeFlag(args, ["donate"]);
+  /*
+  // TODO figure out how to bypass outputs
+  let donate = Cli.removeFlag(args, ["donate"]);
   if (donate) {
     args.push("--donate");
-    await pay(config, wallet, args);
+    await send(config, wallet, args);
     return wallet;
   }
+  */
 
-  let showBalances = removeFlag(args, ["accounts", "balance", "balances"]);
+  let showBalances = Cli.removeFlag(args, ["accounts", "balance", "balances"]);
   if (showBalances) {
     await getBalances(config, wallet, args);
     return null;
@@ -227,15 +239,15 @@ async function main() {
 
   // TODO add note/comment to wallet, address, tx, etc
 
-  let exp = removeFlag(args, ["export"]);
+  let exp = Cli.removeFlag(args, ["export"]);
   if (exp) {
     await exportWif(config, wallet, args);
     return wallet;
   }
 
-  let gen = removeFlag(args, ["create", "generate", "new"]);
+  let gen = Cli.removeFlag(args, ["create", "generate", "new"]);
   if (gen) {
-    let genWif = removeFlag(args, ["wif", "address"]);
+    let genWif = Cli.removeFlag(args, ["wif", "address"]);
     if (!genWif) {
       console.error(`Unrecognized subcommand '${gen} ${args[0]}'`);
       process.exit(1);
@@ -244,19 +256,19 @@ async function main() {
     return wallet;
   }
 
-  let rm = removeFlag(args, ["delete", "remove", "rm"]);
+  let rm = Cli.removeFlag(args, ["delete", "remove", "rm"]);
   if (rm) {
     await remove(config, wallet, args);
     return wallet;
   }
 
-  let showStats = removeFlag(args, ["stat", "stats", "status"]);
+  let showStats = Cli.removeFlag(args, ["stat", "stats", "status"]);
   if (showStats) {
     await stat(config, wallet, args);
     return wallet;
   }
 
-  let forceSync = removeFlag(args, ["reindex", "sync"]);
+  let forceSync = Cli.removeFlag(args, ["reindex", "sync"]);
   if (forceSync) {
     let now = Date.now();
     console.info("syncing...");
@@ -264,7 +276,7 @@ async function main() {
     return null;
   }
 
-  let help = removeFlag(args, ["help", "--help", "-h"]);
+  let help = Cli.removeFlag(args, ["help", "--help", "-h"]);
   if (help) {
     usage();
     return null;
@@ -277,61 +289,6 @@ async function main() {
   }
 
   throw new Error(`'${args[0]}' is not a recognized subcommand`);
-}
-
-/**
- * @param {Array<String>} arr
- * @param {Array<String>} aliases
- * @returns {String?}
- */
-function removeFlag(arr, aliases) {
-  /** @type {String?} */
-  let arg = null;
-  aliases.forEach(function (item) {
-    let index = arr.indexOf(item);
-    if (-1 === index) {
-      return null;
-    }
-
-    if (arg) {
-      throw Error(`duplicate flag ${item}`);
-    }
-
-    arg = arr.splice(index, 1)[0];
-  });
-
-  return arg;
-}
-
-/**
- * @param {Array<String>} arr
- * @param {Array<String>} aliases
- * @returns {String?}
- */
-function removeFlagAndArg(arr, aliases) {
-  /** @type {String?} */
-  let arg = null;
-  aliases.forEach(function (item) {
-    let index = arr.indexOf(item);
-    if (-1 === index) {
-      return null;
-    }
-
-    // flag
-    let flag = arr.splice(index, 1);
-
-    if (arg) {
-      throw Error(`duplicate flag ${item}`);
-    }
-
-    // flag's arg
-    arg = arr.splice(index, 1)[0];
-    if ("undefined" === typeof arg) {
-      throw Error(`'${flag}' requires an argument`);
-    }
-  });
-
-  return arg;
 }
 
 let SHORT_VERSION = `${pkg.name} v${pkg.version} - ${pkg.description}`;
@@ -351,8 +308,9 @@ let USAGE = [
   `SUBCOMMANDS:`,
   `    accounts                           show accounts (and extra wallets)`,
   `    export <addr> [./dir/ or x.wif]    write private keys to disk`,
-  `    contact <handle> [xpub-or-addr]    add contact or show xpubs & addrs`,
-  `    generate address                   gen and store one-off wif`,
+  `    contact <handle> xpub-or-addr      add contact or show xpubs & addrs`,
+  `    request <handle> [amount]          show QR and payment address`,
+  `    generate address                   (for debugging only) save a one-off WIF`,
   `    import <./path/to.wif>             save private keys`,
   `    coins [--sort wallet,amount,addr]  show all spendable coins`,
   `    send <handle|pay-addr> <DASH>      send to an address or contact`,
@@ -377,72 +335,122 @@ function usage() {
 }
 
 /** @type {Subcommand} */
-async function befriend(config, wallet, args) {
+async function upsertContact(config, wallet, args) {
   let [handle, xpubOrAddr] = args;
   if (!handle) {
-    throw Error(`Usage: dashwallet contact <handle> [xpub-or-static-addr]`);
+    throw Error(
+      `Usage: dashwallet contact <handle> [xpub-or-static-addr] [--legacy <address count>]`,
+    );
   }
+  let countStr = Cli.removeOption(args, ["--legacy", "-n"]);
+  let count = parseInt(countStr, 10) || 1;
 
   let xpub = "";
   let address = "";
   let isXPub = await Wallet.isXPub(xpubOrAddr);
+  let isAddr = await Wallet.isAddr(xpubOrAddr);
   if (isXPub) {
     xpub = xpubOrAddr;
-  } else {
+  } else if (isAddr) {
     address = xpubOrAddr;
+  } else if (xpubOrAddr) {
+    throw new Error(`unrecognized option ${xpubOrAddr}`);
   }
 
-  let [rxXPub, txWallet] = await wallet.befriend({
-    handle,
-    xpub,
-    address,
-    addr: address,
-  });
+  let [rxXPub, txWallet] = await wallet // jshint ignore:line
+    .contact({
+      handle,
+      xpub,
+      address,
+    });
 
   let txAddrsInfo = {
     addresses: [],
     index: 0,
   };
   if (txWallet?.xpub) {
-    txAddrsInfo = await wallet.getNextPayAddrs({ handle, count: 1 });
+    txAddrsInfo = await wallet.getNextPayAddrs({ handle, count });
   }
-  if (txAddrsInfo.addresses.length) {
-    let addrIndex = `#${txAddrsInfo.index}`;
-    if (txWallet?.addr) {
-      addrIndex = `multi-use`;
-    }
-
-    console.info();
-    console.info(`Send DASH to '${handle}' at this address (${addrIndex}):`);
-
-    // TODO QR
-    let txAddr = txAddrsInfo.addresses[0];
-    console.info(`${txAddr}`);
-  }
-
-  console.info();
-  console.info(`Share this "dropbox" wallet (xpub) with '${handle}':`);
-  // TODO QR
-  console.info(rxXPub);
-  console.info();
-  let count = 20;
-  let rxAddrInfo = await wallet.getNextReceiveAddrs({ handle, count });
-  if (count === 1) {
-    let rxAddr = rxAddrInfo.addresses[0];
-    console.info(`(next address is '${rxAddr}')`);
+  if (!txAddrsInfo.addresses.length) {
+    // TODO live wallet link to request xpub
+    console.error("no xpub or unused addresses found");
+    process.exit(1);
     return;
   }
-  console.info(`Next addresses:`);
-  rxAddrInfo.addresses.forEach(
-    /**
-     * @param {String} addr
-     * @param {Number} i
-     */
-    function (addr, i) {
-      let index = i + rxAddrInfo.index;
-      console.info(`    ${addr} (${index})`);
-    },
-  );
+
+  let addrIndex = `#${txAddrsInfo.index}`;
+  let multiUse = txWallet?.address || txWallet?.addr;
+  if (multiUse) {
+    addrIndex = `multi-use`;
+  }
+
+  console.info();
+  console.info(`Send DASH to '${handle}':`);
+
+  let txAddr = txAddrsInfo.addresses[0];
+  console.info();
+  console.info(`XPub Address:\n${txAddrsInfo.xpub}`);
+  console.info(`(legacy address [${addrIndex}]: ${txAddr})`);
+  console.info();
+  let url = toUrl(txAddrsInfo.xpub, txAddr);
+  console.info(url);
+
+  let qr = toQrAscii(txAddrsInfo.xpub, txAddr);
+  console.info();
+  console.info(qr);
+  console.info();
+}
+
+/** @type {Subcommand} */
+async function requestTransfer(config, wallet, args) {
+  let [handle] = args;
+  if (!handle) {
+    throw Error(
+      `Usage: dashwallet request <handle> [amount] [--legacy <address count>]`,
+    );
+  }
+  let countStr = Cli.removeOption(args, ["--legacy", "-n"]);
+  let count = parseInt(countStr, 10) || 1;
+
+  let [rxXPub] = await wallet.contact({
+    handle,
+  });
+
+  console.info();
+  console.info(`Receive DASH from '${handle}':`);
+  console.info();
+  console.info(`XPub Address:`);
+  console.info(rxXPub);
+  let rxAddrsInfo = await wallet.getNextReceiveAddrs({ handle, count });
+  if (count === 1) {
+    let rxAddr = rxAddrsInfo.addresses[0];
+    console.info(
+      `(next legacy address [#${rxAddrsInfo.index}] is '${rxAddr}')`,
+    );
+  } else {
+    console.info();
+    console.info(`Legacy addresses:`);
+    rxAddrsInfo.addresses.forEach(
+      /**
+       * @param {String} addr
+       * @param {Number} i
+       */
+      function (addr, i) {
+        let index = i + rxAddrsInfo.index;
+        console.info(`    ${addr} (legacy address ${index})`);
+      },
+    );
+  }
+  console.info();
+
+  let rxAddr = rxAddrsInfo.addresses[0];
+  let url = toUrl(rxXPub, rxAddr);
+  console.info(url);
+
+  let qr = toQrAscii(rxXPub, rxAddr, [], 0, { invert: true });
+  console.info();
+  console.info(qr);
+  console.info();
 }
 
 /** @type {Subcommand} */
@@ -481,8 +489,8 @@ async function createWif(config, wallet, args) {
 
 /** @type {Subcommand} */
 async function remove(config, wallet, args) {
-  let noWif = removeFlag(args, ["--no-wif"]);
-  let force = removeFlag(args, ["--force"]);
+  let noWif = Cli.removeFlag(args, ["--no-wif"]);
+  let force = Cli.removeFlag(args, ["--force"]);
   let [addrPrefix] = args;
 
   if (!addrPrefix?.length) {
@@ -936,12 +944,12 @@ async function inputListToFauxTxos(wallet, inputList) {
 // pay <handle> <amount> [coins] send this amount to person x,
 //     using ALL coins, and send back the change
 /** @type {Subcommand} */
-async function pay(config, wallet, args) {
+async function sendToContact(config, wallet, args) {
   let accountList = Cli.removeOption(args, ["--accounts"]);
   let changeAccount = Cli.removeOption(args, ["--change-account"]);
   let breakChange = Cli.removeFlag(args, ["--break-change"]);
-  let donate = Cli.removeFlag(args, ["--donate"]);
-  let forceDonation = Cli.removeOption(args, ["--force-donation"]) ?? "";
+  //let donate = Cli.removeFlag(args, ["--donate"]);
+  //let forceDonation = Cli.removeOption(args, ["--force-donation"]) ?? "";
   let dryRun = Cli.removeFlag(args, ["--dry-run"]);
   let allowChange = Cli.removeFlag(args, ["--allow-change"]);
   let coinList = Cli.removeOption(args, ["--coins"]);
@@ -1014,10 +1022,11 @@ async function pay(config, wallet, args) {
   let totalSats = 0;
   let totalDenoms = [];
   if (payouts.length === 1) {
-    if (!payouts.satoshis) {
-      payouts.satoshis = 0;
-      for (let utxo of utxos) {
-        payouts.satoshis += utxo.satoshis;
+    if (!payouts[0].satoshis) {
+      let payout = wallet.useAllCoins({ utxos, breakChange });
+      payouts[0].satoshis = 0;
+      for (let satoshis of payout.output.denoms) {
+        payouts[0].satoshis += satoshis;
       }
     }
   }
@@ -1059,15 +1068,30 @@ async function pay(config, wallet, args) {
   for (let payeeHandle of payeeHandles) {
     let payee = payees[payeeHandle];
     let outVals = payee.output.denoms.slice(0);
+    let count = outVals.length;
+    let isAddrLike = Wallet.isAddrLike(handle);
+    if (isAddrLike) {
+      // TODO single, exact output value
+      count = 1;
+    }
+
     let addrsInfo = await wallet.getNextPayAddrs({
       handle: payeeHandle,
-      count: outVals.length,
+      count: count,
       //now: now,
       //staletime: staletime,
     });
+    if (isAddrLike) {
+      while (addrsInfo.addresses.length < outVals.length) {
+        addrsInfo.addresses.push(handle);
+      }
+    }
 
+    console.log("allOutVals", allOutVals);
+    console.log("outVals", outVals);
     for (let denom of outVals) {
       let index = allOutVals.indexOf(denom);
+      console.log(denom);
       if (index === -1) {
         throw new Error(
           "ERROR: missing output values (this should be impossible)",
@@ -1193,10 +1217,13 @@ async function pay(config, wallet, args) {
   let stampsOut = stampsValOut / wallet.__STAMP__;
 
   let fee = totalSatsIn - totalSatsOut;
+  console.log(`initial fee: ${fee} (requires ${fees.max})`);
   let dustFee = fee - fees.max;
   let dustStamps = dustFee / wallet.__STAMP__;
   dustStamps = Math.floor(dustStamps);
   let dustStampsVal = dustStamps * wallet.__STAMP__;
+  console.log(`dustStamps: ${dustStamps}`);
+  console.log(`dustStampsVal: ${dustStampsVal}`);
   fee -= dustStampsVal;
   for (let output of outputs) {
     if (dustStamps === 0) {
@@ -1209,10 +1236,6 @@ async function pay(config, wallet, args) {
     dustStamps -= 1;
   }
   txInfoRaw.outputs.sort(randomize);
-
-  if (fee !== totalSatsIn - totalSatsOut) {
-    throw new Error("sanity fail");
-  }
 
   let satsOut10 = totalSatsOut.toString().padStart(10, " ");
 
@@ -1233,6 +1256,13 @@ async function pay(config, wallet, args) {
   console.log(
     `Fee:             ${fee} |   ${totalSatsIn} - ${totalSatsOut} = (${fees.max} + ${dustyFee})`,
   );
+
+  let actualFee = totalSatsIn - totalSatsOut;
+  if (fee !== actualFee) {
+    throw new Error(
+      `[Sanity Fail] ${fee} != ${actualFee} # ${totalSatsIn} - ${totalSatsOut}`,
+    );
+  }
 
   let keys = await wallet._utxosToPrivKeys(selection.inputs);
   let txInfo = await dashTx.hashAndSignAll(txInfoRaw, keys, {
@@ -1612,7 +1642,7 @@ let coinSorters = {
 
 /** @type {Subcommand} */
 async function listCoins(config, wallet, args) {
-  let sortArg = removeFlagAndArg(args, ["--sort"]) || "";
+  let sortArg = Cli.removeOption(args, ["--sort"]) || "";
   let sortBys = sortArg.split(/[\s,]/).filter(Boolean);
   if (!sortBys.length) {
     sortBys = ["wallet", "amount", "satoshis", "addr"];
@@ -1801,6 +1831,57 @@ function utxoToCoin(addr, utxo) {
   return `${addrId}:${txId}:${utxo.outputIndex}`;
 }
 
+function toUrl(xpub, addr, denoms, amount, opts) {
+  if (!addr) {
+    addr = "";
+  }
+  if (!opts) {
+    opts = {};
+  }
+
+  // TODO tdash, et al
+  let coinScheme = "dash";
+  let query = {};
+  if (xpub) {
+    query.xpub = xpub;
+    if (!opts.size) {
+      opts.size = "mini";
+    }
+  }
+  if (denoms?.length) {
+    query.denoms = denoms.join(",");
+  }
+  if (amount) {
+    query.amount = amount;
+  }
+  let search = new URLSearchParams(query).toString();
+
+  // impossible compatibility (should be allowed either way)
+  //let slashes = "//";
+  let slashes = "";
+  let content = `${coinScheme}:${slashes}${addr}?${search}`;
+  return content;
+}
+
+function toQrAscii(xpub, addr, denoms, amount, opts) {
+  if (!opts) {
+    opts = {};
+  }
+
+  let content = toUrl(xpub, addr, denoms, amount, opts);
+
+  if ("svg" === opts?.format) {
+    return Qr.svg(content);
+  }
+
+  return Qr.ascii(content, {
+    format: "ascii",
+    indent: opts.indent ?? 4,
+    size: opts.size,
+    invert: opts.invert,
+  });
+}
+
 /** @type {Subcommand} */
 async function stat(config, wallet, args) {
   let [addrPrefix] = args;
@@ -1810,7 +1891,7 @@ async function stat(config, wallet, args) {
 
   let addrInfos = await wallet.findAddrs(addrPrefix);
   if (!addrInfos.length) {
-    let searchable = !offline && addrPrefix.length === 34;
+    let searchable = !offline && addrPrefix.length === ADDR_CHAR_LEN;
     if (!searchable) {
       console.error();
       console.error(`'${addrPrefix}' did not match any address in any wallets`);
