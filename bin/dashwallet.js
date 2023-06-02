@@ -1014,6 +1014,7 @@ async function sendMoney(config, wallet, args) {
     broadcast = false;
   }
   let allowChange = Cli.removeFlag(args, ["--allow-change"]);
+  let reuseAddr = Cli.removeFlag(args, ["--reuse-address"]);
   let coinList = Cli.removeOption(args, ["--coins"]);
   if (!changeAccount) {
     changeAccount = "main";
@@ -1129,17 +1130,39 @@ async function sendMoney(config, wallet, args) {
     let count = outVals.length;
     let isAddrLike = Wallet.isAddrLike(handle);
     if (isAddrLike) {
+      reuseAddr = true;
+    }
+    if (reuseAddr) {
       // TODO single, exact output value
       count = 1;
     }
 
-    let addrsInfo = await wallet.getNextPayAddrs({
-      handle: payeeHandle,
-      count: count,
-      //now: now,
-      //staletime: staletime,
-    });
-    if (isAddrLike) {
+    let addrsInfo;
+    try {
+      addrsInfo = await wallet.getNextPayAddrs({
+        handle: payeeHandle,
+        count: count,
+        allowReuse: reuseAddr,
+        now: Date.now(),
+        staletime: config.staletime,
+      });
+    } catch (e) {
+      let acceptable = ["E_TOO_FEW_ADDRESSES", "E_NO_UNUSED_ADDR"];
+      if (!acceptable.includes(e.code)) {
+        throw e;
+      }
+      if (!reuseAddr) {
+        e.message += `\nPass --reuse-address to send to a single, reused address anyway`;
+        throw e;
+      }
+      if (!e.lastAddress) {
+        throw e;
+      }
+      addrsInfo = { index: -1, addresses: [e.lastAddress] };
+      throw e;
+    }
+
+    if (reuseAddr) {
       while (addrsInfo.addresses.length < outVals.length) {
         addrsInfo.addresses.push(handle);
       }
@@ -1148,15 +1171,16 @@ async function sendMoney(config, wallet, args) {
     for (let denom of outVals) {
       let index = allOutVals.indexOf(denom);
       if (index === -1) {
-        throw new Error(
-          "ERROR: missing output values (this should be impossible)",
+        let err = new Error(
+          `[Sanity Fail] missing output values (should be impossible)`,
         );
+        throw err;
       }
 
       let outVal = allOutVals.splice(index, 1)[0];
       if (outVal !== denom) {
         throw new Error(
-          "ERROR: wrong value was spliced (this should be impossible)",
+          "[Sanity Fail] wrong value was spliced (should be impossible)",
         );
       }
 
@@ -1172,7 +1196,7 @@ async function sendMoney(config, wallet, args) {
 
     if (addrsInfo.addresses.length) {
       throw new Error(
-        "ERROR: pay addresses left over (this should be impossible)",
+        "[Sanity Fail] some pay addresses left unused (should be impossible)",
       );
     }
   }
